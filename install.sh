@@ -43,7 +43,7 @@ Usage:
 Examples:
   sudo bash install.sh
   sudo bash install.sh --mode source
-  sudo bash -c "\$(curl -fsSL https://raw.githubusercontent.com/Y3y202/QucPanel-package/main/install.sh)"
+  sudo bash -c "\$(curl -fsSL https://raw.githubusercontent.com/Y3y202/QucPanel-package/master/install.sh)"
 
 Options:
   --install-dir PATH       Install directory, default: /opt/qucpanel
