@@ -217,14 +217,18 @@ resolve_panel_bind() {
     return 0
   fi
 
+  if [[ "$fresh_db" == "1" ]]; then
+    printf '%s:%s' "$DEFAULT_BIND_HOST" "$(generate_panel_port)"
+    return 0
+  fi
+
   local existing_bind
   existing_bind="$(load_existing_bind || true)"
   if [[ -n "$existing_bind" ]]; then
     printf '%s' "$existing_bind"
     return 0
   fi
-
-  printf '%s:%s' "$DEFAULT_BIND_HOST" "$(generate_panel_port)"
+  printf '%s:%s' "$DEFAULT_BIND_HOST" "10000"
 }
 
 fresh_db=0
