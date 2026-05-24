@@ -4,11 +4,11 @@ set -Eeuo pipefail
 APP_NAME="QucPanel"
 SERVICE_NAME="qucpanel.service"
 DEFAULT_INSTALL_DIR="/opt/qucpanel"
-DEFAULT_BIND="0.0.0.0:10000"
+DEFAULT_BIND_HOST="0.0.0.0"
 DEFAULT_PACKAGE_BASE_URL="https://github.com/Y3y202/QucPanel-package/releases/latest/download"
 
 INSTALL_DIR="${QUCPANEL_HOME:-$DEFAULT_INSTALL_DIR}"
-PANEL_BIND="${QUCPANEL_BIND:-$DEFAULT_BIND}"
+PANEL_BIND="${QUCPANEL_BIND:-}"
 PACKAGE_BASE_URL="${QUCPANEL_PACKAGE_BASE_URL:-$DEFAULT_PACKAGE_BASE_URL}"
 PACKAGE_ARCH="${QUCPANEL_PACKAGE_ARCH:-}"
 INSTALL_MODE="${QUCPANEL_INSTALL_MODE:-auto}"
@@ -16,6 +16,7 @@ BIND_EXPLICIT=0
 if [[ -n "${QUCPANEL_BIND:-}" ]]; then
   BIND_EXPLICIT=1
 fi
+ADMIN_USERNAME="${QUCPANEL_ADMIN_USERNAME:-}"
 ADMIN_PASSWORD="${QUCPANEL_ADMIN_PASSWORD:-}"
 SKIP_FRONTEND_BUILD="${SKIP_FRONTEND_BUILD:-0}"
 SKIP_BACKEND_BUILD="${SKIP_BACKEND_BUILD:-0}"
@@ -47,8 +48,9 @@ Examples:
 
 Options:
   --install-dir PATH       Install directory, default: /opt/qucpanel
-  --bind ADDR:PORT         Panel bind address, default: 0.0.0.0:10000
-  --admin-password VALUE   Initial admin password for a fresh database
+  --bind ADDR:PORT         Panel bind address, default: random 10000-50000 on fresh install
+  --admin-username VALUE   Initial panel username for a fresh database
+  --admin-password VALUE   Initial panel password for a fresh database
   --mode MODE              Install mode: auto, source, package
   --package-url URL        Package base URL for binary install mode
   --package-arch ARCH      Package architecture override, e.g. amd64
@@ -60,6 +62,7 @@ Options:
 Environment:
   QUCPANEL_HOME
   QUCPANEL_BIND
+  QUCPANEL_ADMIN_USERNAME
   QUCPANEL_ADMIN_PASSWORD
   QUCPANEL_PACKAGE_BASE_URL
   QUCPANEL_PACKAGE_ARCH
@@ -99,6 +102,11 @@ while [[ $# -gt 0 ]]; do
     --admin-password)
       [[ $# -ge 2 ]] || fail "--admin-password requires a value"
       ADMIN_PASSWORD="$2"
+      shift 2
+      ;;
+    --admin-username)
+      [[ $# -ge 2 ]] || fail "--admin-username requires a value"
+      ADMIN_USERNAME="$2"
       shift 2
       ;;
     --mode)
@@ -157,6 +165,83 @@ fi
 if [[ "$INSTALL_DIR" == "/" || "$INSTALL_DIR" == "/opt" || "$INSTALL_DIR" == "/usr" ]]; then
   fail "Refusing to install directly into high-risk directory: $INSTALL_DIR"
 fi
+
+ENV_FILE="/etc/default/qucpanel"
+DB_PATH="$INSTALL_DIR/qucpanel.db"
+
+random_uint32() {
+  od -An -N4 -tu4 /dev/urandom | tr -d '[:space:]'
+}
+
+random_chars() {
+  local charset="$1"
+  local length="$2"
+  local value=""
+  while [[ "${#value}" -lt "$length" ]]; do
+    value+="$(
+      LC_ALL=C tr -dc "$charset" </dev/urandom | head -c "$((length - ${#value}))" || true
+    )"
+  done
+  printf '%s' "$value"
+}
+
+generate_panel_port() {
+  local raw
+  raw="$(random_uint32)"
+  printf '%s' "$((10000 + raw % 40001))"
+}
+
+generate_password() {
+  local upper lower digit special rest
+  upper="$(random_chars 'A-Z' 1)"
+  lower="$(random_chars 'a-z' 1)"
+  digit="$(random_chars '0-9' 1)"
+  special="$(random_chars '@#%+=_-' 1)"
+  rest="$(random_chars 'A-Za-z0-9@#%+=_-' 14)"
+  printf '%s' "${upper}${lower}${digit}${special}${rest}"
+}
+
+generate_username() {
+  printf 'qp%s' "$(random_chars 'a-z0-9' 10)"
+}
+
+load_existing_bind() {
+  if [[ -f "$ENV_FILE" ]]; then
+    awk -F= '/^QUCPANEL_BIND=/{print $2; exit}' "$ENV_FILE"
+  fi
+}
+
+resolve_panel_bind() {
+  if [[ -n "$PANEL_BIND" ]]; then
+    printf '%s' "$PANEL_BIND"
+    return 0
+  fi
+
+  local existing_bind
+  existing_bind="$(load_existing_bind || true)"
+  if [[ -n "$existing_bind" ]]; then
+    printf '%s' "$existing_bind"
+    return 0
+  fi
+
+  printf '%s:%s' "$DEFAULT_BIND_HOST" "$(generate_panel_port)"
+}
+
+fresh_db=0
+if [[ ! -f "$DB_PATH" ]]; then
+  fresh_db=1
+fi
+
+if [[ "$fresh_db" == "1" ]]; then
+  if [[ -z "$ADMIN_USERNAME" ]]; then
+    ADMIN_USERNAME="$(generate_username)"
+  fi
+  if [[ -z "$ADMIN_PASSWORD" ]]; then
+    ADMIN_PASSWORD="$(generate_password)"
+  fi
+fi
+
+PANEL_BIND="$(resolve_panel_bind)"
 
 parse_bind() {
   local value="$1"
@@ -374,26 +459,8 @@ STATIC_DIR="$INSTALL_DIR/dist"
 BACKUP_DIR="$INSTALL_DIR/backups"
 DATABASE_DIR="$INSTALL_DIR/databases"
 LOG_DIR="$INSTALL_DIR/logs"
-DB_PATH="$INSTALL_DIR/qucpanel.db"
-ENV_FILE="/etc/default/qucpanel"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME"
 CLI_LINK="/usr/local/bin/qucpl"
-
-generate_password() {
-  if command -v openssl >/dev/null 2>&1; then
-    openssl rand -hex 8
-  else
-    od -An -N16 -tx1 /dev/urandom | tr -d '[:space:]' | cut -c1-16
-  fi
-}
-
-fresh_db=0
-if [[ ! -f "$DB_PATH" ]]; then
-  fresh_db=1
-  if [[ -z "$ADMIN_PASSWORD" ]]; then
-    ADMIN_PASSWORD="$(generate_password)"
-  fi
-fi
 
 log "Creating install directories under $INSTALL_DIR"
 install -d -m 0755 "$BIN_DIR" "$STATIC_DIR" "$BACKUP_DIR" "$DATABASE_DIR" "$LOG_DIR"
@@ -434,6 +501,15 @@ if [[ "$fresh_db" == "1" ]]; then
   QUCPANEL_DATABASE_DIR="$DATABASE_DIR" \
   QUCPANEL_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
     "$BIN_DIR/qucpl" restore >/dev/null
+
+  QUCPL_SKIP_RESTART=1 \
+  QUCPANEL_HOME="$INSTALL_DIR" \
+  QUCPANEL_DB="$DB_PATH" \
+  QUCPANEL_STATIC_DIR="$STATIC_DIR" \
+  QUCPANEL_BIND="$PANEL_BIND" \
+  QUCPANEL_BACKUP_DIR="$BACKUP_DIR" \
+  QUCPANEL_DATABASE_DIR="$DATABASE_DIR" \
+    "$BIN_DIR/qucpl" update username "$ADMIN_USERNAME" >/dev/null
 else
   log "Existing database detected; keeping current users and settings"
   QUCPL_SKIP_RESTART=1 \
@@ -534,7 +610,7 @@ printf '  CLI: %s\n' "$CLI_LINK"
 printf '  Data: %s\n' "$INSTALL_DIR"
 printf '  URL: http://%s:%s\n' "$host" "$BIND_PORT"
 if [[ "$fresh_db" == "1" ]]; then
-  printf '  Username: admin\n'
+  printf '  Username: %s\n' "$ADMIN_USERNAME"
   printf '  Password: %s\n' "$ADMIN_PASSWORD"
 fi
 printf '  Next: qucpl status\n'
