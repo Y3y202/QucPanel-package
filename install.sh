@@ -513,7 +513,7 @@ if [[ "$fresh_db" == "1" ]]; then
   QUCPANEL_BIND="$PANEL_BIND" \
   QUCPANEL_BACKUP_DIR="$BACKUP_DIR" \
   QUCPANEL_DATABASE_DIR="$DATABASE_DIR" \
-    "$BIN_DIR/qucpl" update username "$ADMIN_USERNAME" >/dev/null
+    "$BIN_DIR/qucpl" config username "$ADMIN_USERNAME" >/dev/null
 else
   log "Existing database detected; keeping current users and settings"
   QUCPL_SKIP_RESTART=1 \
@@ -559,7 +559,7 @@ if [[ "$BIND_EXPLICIT" == "1" ]]; then
   QUCPANEL_BIND="$PANEL_BIND" \
   QUCPANEL_BACKUP_DIR="$BACKUP_DIR" \
   QUCPANEL_DATABASE_DIR="$DATABASE_DIR" \
-    "$BIN_DIR/qucpl" update port "$BIND_PORT" >/dev/null
+    "$BIN_DIR/qucpl" config port "$BIND_PORT" >/dev/null
 
   if [[ "$BIND_HOST" == "::" ]]; then
     QUCPL_SKIP_RESTART=1 \
